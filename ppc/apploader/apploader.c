@@ -15,8 +15,8 @@
  *
  */
 
-#define PATCH_IPL 1
-#define RESET_DVD 0
+#define PATCH_IPL 3
+#define RESET_DVD 1
 
 #include <stddef.h>
 #include <string.h>
@@ -165,6 +165,9 @@ static void patch_ipl(void);
 #if PATCH_IPL > 1
 static void skip_ipl_animation(void);
 #endif
+#endif
+#if PATCH_IPL > 2
+static void toggle_disable_ipl_patches();
 #endif
 
 /*
@@ -526,6 +529,10 @@ static int al_load(void **address, uint32_t *length, uint32_t *offset)
  */
 static void *al_exit(void)
 {
+#if PATCH_IPL > 2
+	toggle_disable_ipl_patches();
+#endif
+
 #if RESET_DVD
 	writel((readl(FLIPPER_RESET) & ~FLIPPER_RESET_DVD) | 1, FLIPPER_RESET);
 #endif
@@ -583,6 +590,93 @@ static enum ipl_revision get_ipl_revision(void)
 	return IPL_UNKNOWN;
 }
 
+#if PATCH_IPL > 2
+//based on: https://github.com/OffBroadway/gc-boot-tools/commit/c151413dc31eed75d3468e6d80368b99de204186
+
+static void toggle_disable_ipl_patches() {
+	uint32_t sound_level;
+	uint32_t draw_cubes;
+	uint32_t draw_outer;
+	uint32_t draw_inner;
+	uint32_t pad_read;
+
+	switch (get_ipl_revision()) {
+	case IPL_NTSC_10_001:
+		sound_level = 0x8145d4d0;
+		draw_cubes = 0x8131055c;
+		draw_outer = 0x8130d224;
+		draw_inner = 0x81310598;
+		pad_read = 0x81302c3c;
+		break;
+	case IPL_NTSC_11_001:
+		sound_level = 0x81481278;
+		draw_cubes = 0x81310754;
+		draw_outer = 0x8130d428;
+		draw_inner = 0x81310790;
+		pad_read = 0x81302b24;
+		break;
+	case IPL_NTSC_12_001:
+		sound_level = 0x81483340;
+		draw_cubes = 0x81310aec;
+		draw_outer = 0x8130d79c;
+		draw_inner = 0x81310b28;
+		pad_read = 0x81302ec0;
+		break;
+	case IPL_NTSC_12_101:
+		sound_level = 0x814837c0;
+		draw_cubes = 0x81310b04;
+		draw_outer = 0x8130d7b4;
+		draw_inner = 0x81310b40;
+		pad_read = 0x81302ed8;
+		break;
+	case IPL_PAL_10_001:
+		sound_level = 0x814ad118;
+		draw_cubes = 0x81310e94;
+		draw_outer = 0x8130d868;
+		draw_inner = 0x81310ed0;
+		pad_read = 0x81302b24;
+		break;
+	case IPL_MPAL_11:
+		sound_level = 0x8147bf38;
+		draw_cubes = 0x81310680;
+		draw_outer = 0x8130d354;
+		draw_inner = 0x813106bc;
+		pad_read = 0x81302b24;
+		break;
+	case IPL_PAL_12_101:
+		sound_level = 0x814af400;
+		draw_cubes = 0x81310fd4;
+		draw_outer = 0x8130d9a8;
+		draw_inner = 0x81311010;
+		pad_read = 0x81302c8c;
+		break;
+	default:
+		return;
+	}
+
+	#define PPC_NOP 			0x60000000
+	#define PPC_BLR 			0x4e800020
+	#define PPC_NULL 			0x00000000
+	#define SWAP(a, b) { typeof(*(a)) _tmp = *(a); *(a) = *(b); *(b) = _tmp; }
+	#define SWAP_INSTR(addr, instr) { uint32_t* ptr = (uint32_t*)addr; SWAP(ptr, instr); flush_dcache_range(ptr, ptr+1); invalidate_icache_range(ptr, ptr+1); }
+
+	static uint32_t sound_level_instr = PPC_NULL;
+	SWAP_INSTR(sound_level, &sound_level_instr);
+
+	static uint32_t draw_cubes_instr = PPC_NOP;
+	SWAP_INSTR(draw_cubes, &draw_cubes_instr);
+
+	static uint32_t draw_outer_instr = PPC_NOP;
+	SWAP_INSTR(draw_outer, &draw_outer_instr);
+
+	static uint32_t draw_inner_instr = PPC_NOP;
+	SWAP_INSTR(draw_inner, &draw_inner_instr);
+
+	static uint32_t pad_read_instr = PPC_BLR;
+	SWAP_INSTR(pad_read, &pad_read_instr);
+}
+#endif
+
 /*
  *
  */
@@ -590,6 +684,10 @@ static void patch_ipl(void)
 {
 	uint32_t *start, *end;
 	uint32_t *address;
+
+#if PATCH_IPL > 2
+	toggle_disable_ipl_patches();
+#endif
 
 	switch (get_ipl_revision()) {
 	case IPL_NTSC_10_001:
