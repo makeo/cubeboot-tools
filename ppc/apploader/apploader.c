@@ -930,7 +930,8 @@ static void hide_ipl_animation(bool hide) {
 	}
 
 #if !IGNORE_BOOT_MODE
-	if ((*(uint8_t*)boot_mode & 0x80))
+	unsigned long reset_code = ((readl(FLIPPER_RESET) & FLIPPER_RESETCODE_MASK) >> FLIPPER_RESETCODE_SHIFT);
+	if ((*(uint8_t*)boot_mode & 0x80) && reset_code == 0)
 		return;
 #endif
 
