@@ -18,6 +18,9 @@
 #define PATCH_IPL 1
 #define RESET_DVD 0
 
+#define DISABLE_A_SKIP 0
+#define IGNORE_BOOT_MODE 0
+
 #include <stddef.h>
 #include <string.h>
 
@@ -164,10 +167,14 @@ static unsigned char di_buffer[DI_SECTOR_SIZE] __attribute__ ((aligned(32))) =
 static void patch_ipl(void);
 #if PATCH_IPL > 1
 static void skip_ipl_animation(void);
-#endif
-#endif
 #if PATCH_IPL > 2
-static void toggle_disable_ipl_patches();
+static void hide_ipl_animation(bool hide);
+#endif
+#endif
+#endif
+
+#if DISABLE_A_SKIP
+static void disable_a_skip();
 #endif
 
 /*
@@ -184,6 +191,10 @@ void al_start(void **enter, void **load, void **exit)
 
 #if PATCH_IPL > 0
 	patch_ipl();
+#endif
+
+#if DISABLE_A_SKIP
+	disable_a_skip();
 #endif
 }
 
@@ -392,6 +403,10 @@ static int al_load(void **address, uint32_t *length, uint32_t *offset)
 	case 4:
 		/* .dol header loaded */
 
+#if PATCH_IPL > 2
+		hide_ipl_animation(true);
+#endif
+
 		dh = (struct dol_header *)di_buffer;
 
 		/* extra work on first visit */
@@ -521,6 +536,10 @@ static int al_load(void **address, uint32_t *length, uint32_t *offset)
 		break;
 	}
 
+#if PATCH_IPL > 2
+	hide_ipl_animation(false);
+#endif
+
 	return need_more;
 }
 
@@ -529,10 +548,6 @@ static int al_load(void **address, uint32_t *length, uint32_t *offset)
  */
 static void *al_exit(void)
 {
-#if PATCH_IPL > 2
-	toggle_disable_ipl_patches();
-#endif
-
 #if RESET_DVD
 	writel((readl(FLIPPER_RESET) & ~FLIPPER_RESET_DVD) | 1, FLIPPER_RESET);
 #endif
@@ -590,93 +605,6 @@ static enum ipl_revision get_ipl_revision(void)
 	return IPL_UNKNOWN;
 }
 
-#if PATCH_IPL > 2
-//based on: https://github.com/OffBroadway/gc-boot-tools/commit/c151413dc31eed75d3468e6d80368b99de204186
-
-static void toggle_disable_ipl_patches() {
-	uint32_t sound_level;
-	uint32_t draw_cubes;
-	uint32_t draw_outer;
-	uint32_t draw_inner;
-	uint32_t pad_read;
-
-	switch (get_ipl_revision()) {
-	case IPL_NTSC_10_001:
-		sound_level = 0x8145d4d0;
-		draw_cubes = 0x8131055c;
-		draw_outer = 0x8130d224;
-		draw_inner = 0x81310598;
-		pad_read = 0x81302c3c;
-		break;
-	case IPL_NTSC_11_001:
-		sound_level = 0x81481278;
-		draw_cubes = 0x81310754;
-		draw_outer = 0x8130d428;
-		draw_inner = 0x81310790;
-		pad_read = 0x81302b24;
-		break;
-	case IPL_NTSC_12_001:
-		sound_level = 0x81483340;
-		draw_cubes = 0x81310aec;
-		draw_outer = 0x8130d79c;
-		draw_inner = 0x81310b28;
-		pad_read = 0x81302ec0;
-		break;
-	case IPL_NTSC_12_101:
-		sound_level = 0x814837c0;
-		draw_cubes = 0x81310b04;
-		draw_outer = 0x8130d7b4;
-		draw_inner = 0x81310b40;
-		pad_read = 0x81302ed8;
-		break;
-	case IPL_PAL_10_001:
-		sound_level = 0x814ad118;
-		draw_cubes = 0x81310e94;
-		draw_outer = 0x8130d868;
-		draw_inner = 0x81310ed0;
-		pad_read = 0x81302b24;
-		break;
-	case IPL_MPAL_11:
-		sound_level = 0x8147bf38;
-		draw_cubes = 0x81310680;
-		draw_outer = 0x8130d354;
-		draw_inner = 0x813106bc;
-		pad_read = 0x81302b24;
-		break;
-	case IPL_PAL_12_101:
-		sound_level = 0x814af400;
-		draw_cubes = 0x81310fd4;
-		draw_outer = 0x8130d9a8;
-		draw_inner = 0x81311010;
-		pad_read = 0x81302c8c;
-		break;
-	default:
-		return;
-	}
-
-	#define PPC_NOP 			0x60000000
-	#define PPC_BLR 			0x4e800020
-	#define PPC_NULL 			0x00000000
-	#define SWAP(a, b) { typeof(*(a)) _tmp = *(a); *(a) = *(b); *(b) = _tmp; }
-	#define SWAP_INSTR(addr, instr) { uint32_t* ptr = (uint32_t*)addr; SWAP(ptr, instr); flush_dcache_range(ptr, ptr+1); invalidate_icache_range(ptr, ptr+1); }
-
-	static uint32_t sound_level_instr = PPC_NULL;
-	SWAP_INSTR(sound_level, &sound_level_instr);
-
-	static uint32_t draw_cubes_instr = PPC_NOP;
-	SWAP_INSTR(draw_cubes, &draw_cubes_instr);
-
-	static uint32_t draw_outer_instr = PPC_NOP;
-	SWAP_INSTR(draw_outer, &draw_outer_instr);
-
-	static uint32_t draw_inner_instr = PPC_NOP;
-	SWAP_INSTR(draw_inner, &draw_inner_instr);
-
-	static uint32_t pad_read_instr = PPC_BLR;
-	SWAP_INSTR(pad_read, &pad_read_instr);
-}
-#endif
-
 /*
  *
  */
@@ -684,10 +612,6 @@ static void patch_ipl(void)
 {
 	uint32_t *start, *end;
 	uint32_t *address;
-
-#if PATCH_IPL > 2
-	toggle_disable_ipl_patches();
-#endif
 
 	switch (get_ipl_revision()) {
 	case IPL_NTSC_10_001:
@@ -842,79 +766,79 @@ static void skip_ipl_animation(void)
 	reset_code = ((readl(FLIPPER_RESET) & FLIPPER_RESETCODE_MASK) >> FLIPPER_RESETCODE_SHIFT);
 	switch (get_ipl_revision()) {
 	case IPL_NTSC_10_001:
-		if ((!(*(uint8_t *)0x814e46d1 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x814e46d1 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x8145d6d0 == 1
-		    && !(*(uint16_t *)0x8145f14c & 0x0100)
+		    && (!(*(uint16_t *)0x8145f14c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x8145d6f0 == 0x81465728)
 			*(uint8_t *)0x81465747 = 1;
 		break;
 	case IPL_NTSC_10_002:
-		if ((!(*(uint8_t *)0x8155a351 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x8155a351 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x814609c0 == 1
-		    && !(*(uint16_t *)0x814624ec & 0x0100)
+		    && (!(*(uint16_t *)0x814624ec & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x814609e0 == 0x81468ac8)
 			*(uint8_t *)0x81468ae7 = 1;
 		break;
 	case IPL_DEV_10:
-		if ((!(*(uint8_t *)0x8155a971 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x8155a971 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x81460fe0 == 1
-		    && !(*(uint16_t *)0x81462b0c & 0x0100)
+		    && (!(*(uint16_t *)0x81462b0c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x81461000 == 0x814690e8)
 			*(uint8_t *)0x81469107 = 1;
 		break;
 	case IPL_NTSC_11_001:
-		if ((!(*(uint8_t *)0x81581791 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x81581791 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x81481518 == 1
-		    && !(*(uint16_t *)0x8148370c & 0x0100)
+		    && (!(*(uint16_t *)0x8148370c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x81481538 == 0x81489e58)
 			*(uint8_t *)0x81489e77 = 1;
 		break;
 	case IPL_PAL_10_001:
-		if ((!(*(uint8_t *)0x815d41b1 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x815d41b1 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x814ad3b8 == 1
-		    && !(*(uint16_t *)0x814af60c & 0x0100)
+		    && (!(*(uint16_t *)0x814af60c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x814ad3d8 == 0x814b5d58)
 			*(uint8_t *)0x814b5d77 = 1;
 		break;
 	case IPL_PAL_10_002:
-		if ((!(*(uint8_t *)0x815d3851 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x815d3851 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x814ac828 == 1
-		    && !(*(uint16_t *)0x814aeb2c & 0x0100)
+		    && (!(*(uint16_t *)0x814aeb2c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x814ac848 == 0x814b5278)
 			*(uint8_t *)0x814b5297 = 1;
 		break;
 	case IPL_MPAL_11:
-		if ((!(*(uint8_t *)0x8157c451 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x8157c451 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x8147c1d8 == 1
-		    && !(*(uint16_t *)0x8147e3cc & 0x0100)
+		    && (!(*(uint16_t *)0x8147e3cc & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x8147c1f8 == 0x81484b18)
 			*(uint8_t *)0x81484b37 = 1;
 		break;
 	case IPL_TDEV_11:
-		if ((!(*(uint8_t *)0x81587991 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x81587991 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x81487438 == 1
-		    && !(*(uint16_t *)0x8148972c & 0x0100)
+		    && (!(*(uint16_t *)0x8148972c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x81487458 == 0x8148fe78)
 			*(uint8_t *)0x8148fe97 = 1;
 		break;
 	case IPL_NTSC_12_001:
-		if ((!(*(uint8_t *)0x81582f51 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x81582f51 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x814835f0 == 1
-		    && !(*(uint16_t *)0x81484cec & 0x0100)
+		    && (!(*(uint16_t *)0x81484cec & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x81483610 == 0x8148b438)
 			*(uint8_t *)0x8148b457 = 1;
 		break;
 	case IPL_NTSC_12_101:
-		if ((!(*(uint8_t *)0x815833f1 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x815833f1 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x81483a70 == 1
-		    && !(*(uint16_t *)0x8148518c & 0x0100)
+		    && (!(*(uint16_t *)0x8148518c & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x81483a90 == 0x8148b8d8)
 			*(uint8_t *)0x8148b8f7 = 1;
 		break;
 	case IPL_PAL_12_101:
-		if ((!(*(uint8_t *)0x815d5b51 & 0x80) || reset_code != 0 || PATCH_IPL > 2)
+		if ((!(*(uint8_t *)0x815d5b51 & 0x80) || reset_code != 0 || IGNORE_BOOT_MODE)
 		    && *(uint32_t *)0x814af6b0 == 1
-		    && !(*(uint16_t *)0x814b0dcc & 0x0100)
+		    && (!(*(uint16_t *)0x814b0dcc & 0x0100) || DISABLE_A_SKIP)
 		    && *(uint32_t *)0x814af6d0 == 0x814b7518)
 			*(uint8_t *)0x814b7537 = 1;
 		break;
@@ -925,5 +849,143 @@ static void skip_ipl_animation(void)
 
 #endif
 
+#if PATCH_IPL > 2
+//based on: https://github.com/OffBroadway/gc-boot-tools/commit/c151413dc31eed75d3468e6d80368b99de204186
+
+static void hide_ipl_animation(bool hide) {
+	uint32_t boot_mode;
+	uint32_t splash_state;
+	uint32_t pad_state;
+	uint32_t sound_level;
+	uint32_t draw_cubes;
+	uint32_t draw_outer;
+	uint32_t draw_inner;
+
+	switch (get_ipl_revision()) {
+		case IPL_NTSC_10_001:
+			boot_mode = 0x814e46d1;
+			splash_state = 0x8145d6d0;
+			pad_state = 0x8145f14c;
+			sound_level = 0x8145d4d0;
+			draw_cubes = 0x8131055c;
+			draw_outer = 0x8130d224;
+			draw_inner = 0x81310598;
+			break;
+		case IPL_NTSC_11_001:
+			boot_mode = 0x81581791;
+			splash_state = 0x81481518;
+			pad_state = 0x8148370c;
+			sound_level = 0x81481278;
+			draw_cubes = 0x81310754;
+			draw_outer = 0x8130d428;
+			draw_inner = 0x81310790;
+			break;
+		case IPL_NTSC_12_001:
+			boot_mode = 0x81582f51;
+			splash_state = 0x814835f0;
+			pad_state = 0x81484cec;
+			sound_level = 0x81483340;
+			draw_cubes = 0x81310aec;
+			draw_outer = 0x8130d79c;
+			draw_inner = 0x81310b28;
+			break;
+		case IPL_NTSC_12_101:
+			boot_mode = 0x815833f1;
+			splash_state = 0x81483a70;
+			pad_state = 0x8148518c;
+			sound_level = 0x814837c0;
+			draw_cubes = 0x81310b04;
+			draw_outer = 0x8130d7b4;
+			draw_inner = 0x81310b40;
+			break;
+		case IPL_PAL_10_001:
+			boot_mode = 0x815d41b1;
+			splash_state = 0x814ad3b8;
+			pad_state = 0x814af60c;
+			sound_level = 0x814ad118;
+			draw_cubes = 0x81310e94;
+			draw_outer = 0x8130d868;
+			draw_inner = 0x81310ed0;
+			break;
+		case IPL_MPAL_11:
+			boot_mode = 0x8157c451;
+			splash_state = 0x8147c1d8;
+			pad_state = 0x8147e3cc;
+			sound_level = 0x8147bf38;
+			draw_cubes = 0x81310680;
+			draw_outer = 0x8130d354;
+			draw_inner = 0x813106bc;
+			break;
+		case IPL_PAL_12_101:
+			boot_mode = 0x815d5b51;
+			splash_state = 0x814af6b0;
+			pad_state = 0x814b0dcc;
+			sound_level = 0x814af400;
+			draw_cubes = 0x81310fd4;
+			draw_outer = 0x8130d9a8;
+			draw_inner = 0x81311010;
+			break;
+		default:
+			return;
+	}
+
+#if !IGNORE_BOOT_MODE
+	if ((*(uint8_t*)boot_mode & 0x80))
+		return;
 #endif
 
+	static bool applied = false;
+	if (hide && (applied || ((*(uint16_t*)pad_state & 0x0100) && !DISABLE_A_SKIP)))
+		return;
+	if (!hide && (!applied || *(uint32_t*)splash_state == 1))
+		return;
+
+	#define SWAP(a, b) { typeof(*(a)) _tmp = *(a); *(a) = *(b); *(b) = _tmp; }
+	#define SWAP_INSTR(addr, instr) { uint32_t* ptr = (uint32_t*)addr; SWAP(ptr, instr); flush_dcache_range(ptr, ptr+1); invalidate_icache_range(ptr, ptr+1); }
+
+	static uint32_t sound_level_val = 0;
+	SWAP_INSTR(sound_level, &sound_level_val);
+
+	static uint32_t draw_cubes_instr = 0x60000000;
+	SWAP_INSTR(draw_cubes, &draw_cubes_instr);
+
+	static uint32_t draw_outer_instr = 0x60000000;
+	SWAP_INSTR(draw_outer, &draw_outer_instr);
+
+	static uint32_t draw_inner_instr = 0x60000000;
+	SWAP_INSTR(draw_inner, &draw_inner_instr);
+
+	applied = !applied;
+}
+
+#endif
+
+#endif
+
+#if DISABLE_A_SKIP
+	static void disable_a_skip() {
+		switch (get_ipl_revision()) {
+			case IPL_NTSC_10_001:
+				*(uint32_t*)0x8130ff78 = 0x38600000;
+				break;
+			case IPL_NTSC_11_001:
+				*(uint32_t*)0x81310170 = 0x38600000;
+				break;
+			case IPL_NTSC_12_001:
+				*(uint32_t*)0x81310508 = 0x38600000;
+				break;
+			case IPL_NTSC_12_101:
+				*(uint32_t*)0x81310520 = 0x38600000;
+				break;
+			case IPL_PAL_10_001:
+				*(uint32_t*)0x813108b0 = 0x38600000;
+				break;
+			case IPL_MPAL_11:
+				*(uint32_t*)0x8131009c = 0x38600000;
+				break;
+			case IPL_PAL_12_101:
+				*(uint32_t*)0x813109f0 = 0x38600000;
+				break;
+		}
+	}
+#endif
