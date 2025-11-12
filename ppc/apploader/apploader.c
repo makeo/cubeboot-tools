@@ -925,6 +925,42 @@ static void hide_ipl_animation(bool hide) {
 			draw_outer = 0x8130d9a8;
 			draw_inner = 0x81311010;
 			break;
+		case IPL_NTSC_10_002:
+			boot_mode = 0x8155a351;
+			splash_state = 0x814609c0;
+			pad_state = 0x814624ec;
+			sound_level = 0x814606e8;
+			draw_cubes = 0x81311d1c;
+			draw_outer = 0x8130e9e4;
+			draw_inner = 0x81311d58;
+			break;
+		case IPL_PAL_10_002:
+			boot_mode = 0x815d3851;
+			splash_state = 0x814ac828;
+			pad_state = 0x814aeb2c;
+			sound_level = 0x814ac570;
+			draw_cubes = 0x813119e0;
+			draw_outer = 0x8130e64c;
+			draw_inner = 0x81311a08;
+			break;
+		case IPL_TDEV_11:
+			boot_mode = 0x81587991;
+			splash_state = 0x81487438;
+			pad_state = 0x8148972c;
+			sound_level = 0x81487140;
+			draw_cubes = 0x81312e18;
+			draw_outer = 0x8130fac8;
+			draw_inner = 0x81312e54;
+			break;
+		case IPL_DEV_10:
+			boot_mode = 0x8155a971;
+			splash_state = 0x81460fe0;
+			pad_state = 0x81462b0c;
+			sound_level = 0x81460d08;
+			draw_cubes = 0x81311fd8;
+			draw_outer = 0x8130eca0;
+			draw_inner = 0x81312014;
+			break;
 		default:
 			return;
 	}
@@ -986,6 +1022,18 @@ static void hide_ipl_animation(bool hide) {
 				break;
 			case IPL_PAL_12_101:
 				*(uint32_t*)0x813109f0 = 0x38600000;
+				break;
+			case IPL_NTSC_10_002:
+				*(uint32_t*)0x81311738 = 0x38600000;
+				break;
+			case IPL_PAL_10_002:
+				*(uint32_t*)0x8131140c = 0x38600000;
+				break;
+			case IPL_TDEV_11:
+				*(uint32_t*)0x81312834 = 0x38600000;
+				break;
+			case IPL_DEV_10:
+				*(uint32_t*)0x813119f4 = 0x38600000;
 				break;
 		}
 	}
